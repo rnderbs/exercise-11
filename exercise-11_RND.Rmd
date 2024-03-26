@@ -1,0 +1,266 @@
+---
+title: "exercise-11"
+author: "Riley N Derby"
+date: "2024-03-26"
+output: html_document
+---
+exercise 11
+
+load in bird dataset and winnow down to 19 variables
+```{r}
+library(tidyverse)
+library(car)
+library(broom)
+library(ggplot2)
+library(manipulate)
+f <- "https://raw.githubusercontent.com/difiore/ada-2024-datasets/main/AVONETdataset1.csv"
+b <- read_csv(f, col_names = TRUE)
+
+b <- b %>%
+  select("Species1", 'Family1', "Order1","Beak.Length_Culmen", "Beak.Width", "Beak.Depth", "Tarsus.Length", "Wing.Length", "Tail.Length", "Mass", "Habitat", "Migration", "Trophic.Level", "Trophic.Niche", "Min.Latitude", "Max.Latitude", "Centroid.Latitude", "Range.Size", "Primary.Lifestyle")
+glimpse(b)
+```
+
+---Challenge 1---
+
+Step 1
+Make boxplots of log(Mass) in relation to Trophic.Level and Migration behavior type. For each plot, drop from the visualization all species records where the categorical variable of interest is missing from the dataset. Also, you will want to convert the variable Migration (which is scored as a number: “1”, “2”, or “3”) from class numeric to either being classified as a factor or as a character (string) variable.
+
+```{r}
+ggplot(data = b %>% drop_na(Trophic.Level),
+       aes(x= Trophic.Level, y = log(Mass))) +
+  geom_boxplot()+
+  geom_jitter(alpha = 0.05)
+
+ggplot(data = b %>% drop_na(Migration),
+       aes(x= as.factor(Migration), y = log(Mass))) +
+  geom_boxplot()
+```
+
+Step 2
+Run linear models using the lm() function to look at the relationship between log(Mass) and Trophic.Level and between log(Mass) and Migration.
+```{r}
+m1 <- lm(data = b, log(Mass)~ Trophic.Level)
+
+
+b <- b %>% mutate(Migration = as.factor(Migration)) #change migration to categorical from here on out
+m2 <- lm(data = b, log(Mass)~ Migration)
+
+summary(m1)
+summary(m2)
+```
+
+Examine the output of the resultant linear models. Is log(Mass) associated with either Trophic.Level or Migration category? That is, in the global test of significance, is the F statistic large enough to reject the null hypothesis of an F value of zero?
+
+-- The overall models are both significant 
+
+
+Given the regression coefficients returned for your Migration model, which Migration categor(ies) are different than the reference level? What level is the reference level? Relevel and assess differences among the remaining pair of Migration categories.
+
+--for migration the intercept is category 1 
+
+lets relevel the factors 
+```{r}
+b1<- b %>%
+  mutate(Migration = relevel(Migration, ref = "3"))
+
+m3<- lm(log(Mass) ~ Migration, data = b1)
+summary(m3)
+
+### look at the difference between summary(m2) and summary and (m3) see that migration 3 has now moved to intercept 
+```
+
+Step 3
+Conduct a post-hoc Tukey Honest Significant Differences test to also evaluate which Migration categories differ “significantly” from one another (see Module 20).
+```{r}
+#THSD test
+m1 <- lm(log(Mass) ~ Trophic.Level, data = b)
+summary(m1)
+
+m1aov <- aov(log(Mass) ~ Trophic.Level, data = b)
+summary(m1aov)
+
+pairwise.t.test(log(b$Mass), b$Trophic.Level, p.adj = "bonferroni")
+
+posthoc <- TukeyHSD(m1aov, which = 'Trophic.Level', conf.level = 0.95)
+posthoc
+
+```
+
+
+Step 4
+Use a permutation approach to inference to generate a null distribution of F statistic values for the model of log(Mass) in relation to Trophic.Level and calculate a p value for your original F statistic. You can do this either by programming your own permutation test (e.g., by shuffling values for the predictor or response variable among observations and calculating an F statistic for each replicate) or by using the {infer} workflow and setting calculate(stat="F")
+```{r}
+original.F <- aov(log(Mass) ~ Trophic.Level, data = b) %>%
+  tidy() %>%
+  filter(term == "Trophic.Level")
+
+original.F #results for F stat and p value for omnibus F test
+
+library(infer)
+
+b <- 
+  b %>%
+  mutate(logMass = log(Mass))
+
+permuted.F <- b %>%
+  specify(logMass ~ Trophic.Level) %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "F")
+str(permuted.F)
+
+hist(permuted.F$stat)
+
+visualize(permuted.F) +
+  shade_p_value(obs_stat = original.F$statistic, direction = "greater")
+```
+
+
+---Challenge 2---
+
+Step 1
+Create the following two new variables and add them to AVONET dataset:
+Relative beak length, which you should calculate as the residual of log(Beak.Length_Culmen) on log(Mass).
+Relative tarsus length, which you should calculate as the residual of log(Tarsus.Length) on log(Mass).
+```{r}
+b$relBL <- resid(lm(formula = log(Beak.Length_Culmen)~ log(Mass), data = b))
+
+b$relTL <- resid(lm(formula = log(Tarsus.Length)~ log(Mass), data = b))
+```
+
+Step 2
+Make a boxplot or violin plot of your new relative tarsus length variable in relation to Primary.Lifestyle and of your new relative beak length variable in relation to Trophic.Niche
+```{r}
+ggplot(data = b %>%
+          filter(!is.na(Primary.Lifestyle)), 
+       aes(x= Primary.Lifestyle, y = relTL)) +
+  geom_boxplot()
+
+
+ggplot(data = b %>%
+          filter(!is.na(Trophic.Niche)), 
+       aes(x= Trophic.Niche, y = relBL)) +
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+Step 3
+Run an ANOVA analyses to look at the association between geographic range size and the variable Migration. You should first drop those observations for which Migration is not scored and also look at the distribution of the variable Range.Size to decide whether and how it might need to be transformed. Based on the global model, is range size associated with form of migration? How much of the variance in your measure of range size is associated with Migration behavior style?
+
+Given the regression coefficients returned in output of the model, which Migration categor(ies) are different than the reference level? What level is the reference level? Relevel and assess differences among the remaining pair of Migration categories. Also conduct a post-hoc Tukey Honest Significant Differences test to also evaluate which Migration categories differ “significantly” from one another (see Module 20).
+
+```{r}
+m3 <- lm(Range.Size ~ as.factor(Migration), data = b)
+summary(m3)
+
+m3 <- aov(Range.Size ~ as.factor(Migration), data = b)
+summary(m3)
+#significant relationship between range size and migration category
+
+TukeyHSD(m3)
+
+ggplot(b, aes(x= as.factor(Migration), y = log(Range.Size)))+
+         geom_boxplot()
+```
+
+--Migration category 1 is the reference level and it looks like there is a signifcant relationship between range size and migration category. The 3 categories are all different from one another as well. 
+
+
+
+Step 4
+Winnow your original data to just consider birds from the Infraorder “Passeriformes” (song birds).
+
+Run separate one-factor ANOVA analyses to look at the association between [1] relative beak length and Primary.Lifestyle and between [2] relative beak length and Trophic.Level. In doing so…
+
+Make boxplots of response variable by each predictor and by the combination of predictors.
+
+Run linear models for each predictor separately and interpret the model output.
+```{r}
+b1 <- b %>%
+  filter(Order1 == "Passeriformes")
+
+b1
+
+ggplot(data = b1 %>%
+          filter(!is.na(Primary.Lifestyle)), 
+       aes(x= Primary.Lifestyle, y = relBL)) +
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90))
+
+ggplot(data = b1 %>%
+          filter(!is.na(Trophic.Level)), 
+       aes(x= Trophic.Level, y = relBL)) +
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90))
+
+#models
+m4 <- lm(relBL ~ Primary.Lifestyle, data = b1)
+summary(m4)
+
+maov4 <- lm(relBL ~ Primary.Lifestyle, data = b1)
+summary(maov4)
+
+m5 <- lm(relBL ~ Trophic.Level, data = b1)
+summary(m5)
+
+maov5 <- aov(relBL ~ Trophic.Level, data = b1)
+summary(maov5)
+```
+
+Step 5
+Run a two-factor model to look at the association between relative beak length and both Primary.Lifestyle and Trophic.Level among the passeriforms. Based on the model output, what would you conclude about how relative beak length is related to these two variables?
+
+```{r}
+m6 <- lm(relBL ~ Trophic.Level + Primary.Lifestyle, data = b1)
+summary(m6)
+
+maov6 <- aov(relBL ~ Trophic.Level + Primary.Lifestyle, data = b1)
+summary(maov6)
+
+#beak length is impacted by trophic level and lifestyle with non-significant effect for ominvores, but a trend
+```
+
+Step 6
+Finally, run an additional two-way model with the same dataset and predictors, but adding the possibility of an interaction term. To do this, you should modify your model formula using the colon operator (:) to specify the interaction, e.g., relative beak length ~ Primary.Lifestyle + Trophic.Level + Primary.Lifestyle:Trophic.Level. Based on the model output, what would you now conclude about how relative beak length is related to these two variables?
+```{r}
+m7 <- lm(relBL~ Trophic.Level + Primary.Lifestyle + Trophic.Level:Primary.Lifestyle, data = b1)
+summary(m7)
+
+maov7 <- aov(relBL~ Trophic.Level + Primary.Lifestyle + Trophic.Level:Primary.Lifestyle, data = b1)
+summary(maov7)
+
+
+#beak length, trophic level, and lifestyle influence one another
+```
+
+Step 7
+Use the interaction.plot() function to visualize the interaction between Primary.Lifestyle and Trophic.Level (see Module 20).
+```{r}
+interaction.plot(x.factor = b1$Trophic.Level,
+                 xlab = "Trop Level",
+                 trace.factor = b1$Primary.Lifestyle,
+                 trace.label = 'Prim Life',
+                 response = b1$relBL, 
+                 ylab = 'Mean relative Beak Length')
+
+##flip troph level and prim lifestyle to visualize the other way
+interaction.plot(x.factor = b1$Primary.Lifestyle,
+                 xlab = "Prim Life",
+                 trace.factor = b1$Trophic.Level,
+                 trace.label = 'Trop Level',
+                 response = b1$relBL, 
+                 ylab = 'Mean relative Beak Length')
+
+```
+
+
+
+
+
+
+
+
+
+
+
